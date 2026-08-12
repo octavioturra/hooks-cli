@@ -1,0 +1,129 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  # Recomendador de Fala
+
+  CLI Windows que escuta uma conversa ao vivo e mostra no terminal até 3
+  lembretes ("hooks") relevantes, extraídos de um arquivo de texto do usuário.
+
+  ## Vocabulário
+
+  - **hook**: um fato que o usuário já conhece e quer lembrar na hora certa.
+    NÃO é uma fala pronta para leitura em voz alta. Nunca gere, reescreva ou
+    parafraseie o texto de um hook — ele é exibido literalmente como escrito.
+  - **interlocutor**: a outra pessoa na conversa. Chega pelo áudio do sistema.
+  - **usuário**: quem roda o CLI. Chega pelo microfone.
+
+  ## Restrições invioláveis
+
+  Valem para toda change. Violação é bug, não trade-off.
+
+  - Nenhuma escrita em disco além dos arquivos de modelo. Sem cache, sem log
+    de transcrição, sem histórico, sem arquivo de sessão.
+  - Nenhuma conexão de rede em runtime. Nenhuma dependência de serviço externo.
+  - Sem estado entre execuções. Fechou, acabou.
+  - Transcrição existe apenas em memória, numa janela deslizante que sobrescreve
+    o conteúdo antigo.
+  - Proibido alocar, adquirir lock, fazer I/O ou entrar em panic dentro da
+    callback de áudio. Comunicação com o worker apenas por ring buffer
+    lock-free.
+  - Sem configuração persistida. Só flags de linha de comando.
+
+  ## Stack
+
+  - Rust, Windows 10/11 x64, binário único
+  - `cpal` ou `wasapi` — captura WASAPI (loopback + microfone)
+  - `voice_activity_detector` — Silero VAD
+  - `whisper-rs` — whisper.cpp, modelo `base` ou `small`
+  - `fastembed` — `multilingual-e5-small`
+  - `crossterm` — render em região fixa do terminal
+
+  Microfone e áudio do sistema são dispositivos distintos. Isso separa os
+  interlocutores sem modelo de diarização. Não introduza diarização.
+
+  Índice vetorial é busca linear sobre dezenas ou centenas de hooks.
+  Não otimize com ANN, HNSW ou banco vetorial.
+
+  ## Pipeline
+
+  ```
+  arquivo.txt -> split por linha -> embeddings -> índice em memória
+                                                        |
+  áudio sistema -> VAD -> chunks -> whisper -> texto -> topK -> terminal
+                                                |
+                                       janela deslizante 90s
+  ```
+
+  O canal do microfone é capturado mas não transcrito. Reservado para evolução.
+
+  ## Parâmetros de calibração
+
+  Estes valores são chute inicial e pertencem à calibração humana com conversas
+  reais. Não os altere, não os "corrija" e não derive testes que dependam do
+  valor exato. Devem ser configuráveis, não hardcoded.
+
+  - THRESHOLD de similaridade: 0.72
+  - DWELL (tempo mínimo de exibição antes de trocar): 4s
+  - COOLDOWN (supressão de hook já exibido): 120s
+  - Janela de contexto: 90s
+  - Chunk de transcrição: 5s
+
+  ## Postura de erro
+
+  Três slots trocam precisão por recall. Slot vazio é preferível a hook
+  irrelevante, mas falso positivo tem custo baixo — o usuário ignora e segue.
+
+  Nunca pisque nem substitua um hook antes do DWELL. Nunca faça scroll: hook
+  novo empurrando os antigos é ilegível de relance, que é o modo de uso.
+
+  ## Fora de escopo permanente
+
+  Não implemente, não sugira, não deixe hook de extensão para:
+
+  - macOS, Linux
+  - Interface gráfica, overlay sobre janelas
+  - Persistência de qualquer natureza
+  - Login, conta, telemetria
+  - Resumo pós-conversa
+  - Edição de hooks pelo app
+  - Geração ou reescrita de texto por LLM
+
+  ## Convenções
+
+  - Toda lógica pura (parse, índice, scoring, política de exibição) deve ser
+    testável sem hardware de áudio.
+  - O modo `--simulate <transcript.txt>` injeta linhas como se fossem
+    transcrições, em ritmo cronometrado. É o caminho de teste padrão em CI.
+  - O modo `--debug` imprime o score de todos os hooks por segmento. É a única
+    instrumentação que torna a calibração possível.
+  - Mensagens de erro em português, diretas, sem stack trace para o usuário.
+
+  As changes deste projeto estão em `openspec/roadmap.md`, uma entrada por id.
+  Ao propor uma change, leia a entrada correspondente ao id e use "Entra" e
+  "Não entra" como escopo literal. Não expanda além disso. Se o id não existir
+  no roadmap, pergunte antes de propor.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
